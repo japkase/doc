@@ -52,3 +52,8 @@ vars.put('FILE_BASE64', base64)
 
 find . -type f -path '*/build/test-results/*/*.xml' -print0 \
  | xargs -0 grep -ho '<testcase ' | wc -l
+
+
+rg -n -U -P '@(Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)(?:.|\n){0,5}\b([A-Za-z_][A-Za-z0-9_]*)\s*\(' src/test/java \
+  --no-filename --replace '$2' \
+| sort | uniq -c | awk '$1>1' | sort -nr

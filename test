@@ -48,3 +48,7 @@ vars.put('FILE_BASE64', base64)
 
 def base64 = java.util.Base64.getEncoder().encodeToString(new File('/ABSOLUTE/PATH/document.pdf').bytes)
 vars.put('FILE_BASE64', base64)
+
+
+find . -type f -path '*/build/test-results/*/*.xml' -print0 \
+ | xargs -0 grep -ho '<testcase ' | wc -l

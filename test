@@ -37,6 +37,10 @@ writer << CRLF
 writer << '--' + boundary + '--' + CRLF
 writer.flush()
 
+
+def base64 = new File('/ABSOLUTE/PATH/document.pdf').bytes.encodeBase64().toString()
+vars.put('FILE_BASE64', base64)
+
 byte[] payload = baos.toByteArray()
 def tmp = File.createTempFile('mtom-', '.mime')
 Files.write(tmp.toPath(), payload)

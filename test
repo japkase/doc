@@ -1,0 +1,43 @@
+import java.nio.file.Files
+
+def boundary = 'MIMEBoundary' + UUID.randomUUID().toString().replace('-', '')
+vars.put('BOUNDARY', boundary)
+
+def cid = 'doc1-' + System.currentTimeMillis() + '@jmeter'
+vars.put('CID', cid)
+
+// SOAP zarf şablonunuzda ${CID} placeholder’ı olsun (xop:Include içinde)
+def soapTemplatePath = '/ABSOLUTE/PATH/soap_envelope.xml'
+def envelope = new File(soapTemplatePath).getText('UTF-8').replace('${CID}', cid)
+
+// Göndereceğiniz dosya
+def filePath = '/ABSOLUTE/PATH/document.pdf'
+byte[] fileBytes = new File(filePath).bytes
+
+def CRLF = '\r\n'
+ByteArrayOutputStream baos = new ByteArrayOutputStream()
+def writer = new OutputStreamWriter(baos, 'UTF-8')
+
+// Root SOAP part
+writer << '--' + boundary + CRLF
+writer << 'Content-Type: application/xop+xml; charset=UTF-8; type="text/xml"' + CRLF
+writer << 'Content-Transfer-Encoding: 8bit' + CRLF
+writer << 'Content-ID: <rootpart@jmeter>' + CRLF + CRLF
+writer << envelope + CRLF
+writer.flush()
+
+// Attachment part
+writer << '--' + boundary + CRLF
+writer << 'Content-Type: application/pdf' + CRLF
+writer << 'Content-Transfer-Encoding: binary' + CRLF
+writer << 'Content-ID: <' + cid + '>' + CRLF + CRLF
+writer.flush()
+baos.write(fileBytes)
+writer << CRLF
+writer << '--' + boundary + '--' + CRLF
+writer.flush()
+
+byte[] payload = baos.toByteArray()
+def tmp = File.createTempFile('mtom-', '.mime')
+Files.write(tmp.toPath(), payload)
+vars.put('RAW_FILE', tmp.absolutePath)

@@ -60,3 +60,6 @@ rg -n -U -P '@(Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)(?:.
 rg -n -U -P '@(Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)(?:.|\n){0,5}\b([A-Za-z_][A-Za-z0-9_]*)\s*\(' src/test/java \
   --no-filename --replace '$2' \
 | sort | uniq -c | awk '$1>1' | sort -nr
+
+
+Get-ChildItem .\src\test\java -Recurse -Include *.java | % { $s = Get-Content $_.FullName -Raw; [regex]::Matches($s, '@(Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)[\s\S]{0,400}?(?:public|protected|private)?\s*(?:static\s+)?[\w\<\>\[\]\?,\.\s]+\s+([A-Za-z_]\w*)\s*\(') | % { $_.Groups[2].Value } } | Group-Object | ? { $_.Count -gt 1 } | Sort-Object Count -Descending | ft Count,Name -Auto

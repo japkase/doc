@@ -63,3 +63,44 @@ rg -n -U -P '@(Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)(?:.
 
 
 Get-ChildItem .\src\test\java -Recurse -Include *.java | % { $s = Get-Content $_.FullName -Raw; [regex]::Matches($s, '@(Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)[\s\S]{0,400}?(?:public|protected|private)?\s*(?:static\s+)?[\w\<\>\[\]\?,\.\s]+\s+([A-Za-z_]\w*)\s*\(') | % { $_.Groups[2].Value } } | Group-Object | ? { $_.Count -gt 1 } | Sort-Object Count -Descending | ft Count,Name -Auto
+
+
+
+
+
+tasks.register('duplicateTestNames') {
+  group = 'verification'
+  description = 'Find duplicate JUnit test method names in src/test/java'
+  doLast {
+    def roots = [file('src/test/java')] // Kotlin testler varsa: add file('src/test/kotlin')
+    def pattern = java.util.regex.Pattern.compile(
+      '@(Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)(?s).{0,400}?'
+      + '(?:public|protected|private)?\\s*(?:static\\s+)?[\\w<>\\[\\]\\?,\\.\\s]+\\s+([A-Za-z_]\\w*)\\s*\\('
+    )
+    def counts = new LinkedHashMap<String,Integer>().withDefault{0}
+    def occ = new LinkedHashMap<String, java.util.List<String>>().withDefault{[]}
+    roots.findAll{ it.exists() }.each { dir ->
+      dir.eachFileRecurse { f ->
+        if (f.name.endsWith('.java')) { // .kt de eklemek isterseniz: || f.name.endsWith('.kt')
+          def s = f.getText('UTF-8')
+          def m = pattern.matcher(s)
+          while (m.find()) {
+            def name = m.group(2)
+            counts[name] = counts[name] + 1
+            def line = s.substring(0, m.start()).split('\\R').length
+            occ[name] = (occ[name] + ["${f.path}:${line}"]) as java.util.List<String>
+          }
+        }
+      }
+    }
+    def dups = counts.findAll { k,v -> v > 1 }.sort { -it.value }
+    if (dups.isEmpty()) {
+      println 'No duplicate test method names found.'
+    } else {
+      println 'Duplicates (count\tname):'
+      dups.each { k,v -> println "${v}\t${k}" }
+      println '\nLocations:'
+      dups.keySet().each { name -> occ[name].each { println it } }
+    }
+  }
+}

@@ -37,11 +37,14 @@ writer << CRLF
 writer << '--' + boundary + '--' + CRLF
 writer.flush()
 
-
-def base64 = new File('/ABSOLUTE/PATH/document.pdf').bytes.encodeBase64().toString()
-vars.put('FILE_BASE64', base64)
-
 byte[] payload = baos.toByteArray()
 def tmp = File.createTempFile('mtom-', '.mime')
 Files.write(tmp.toPath(), payload)
 vars.put('RAW_FILE', tmp.absolutePath)
+
+
+def base64 = new File('/ABSOLUTE/PATH/document.pdf').bytes.encodeBase64().toString()
+vars.put('FILE_BASE64', base64)
+
+def base64 = java.util.Base64.getEncoder().encodeToString(new File('/ABSOLUTE/PATH/document.pdf').bytes)
+vars.put('FILE_BASE64', base64)

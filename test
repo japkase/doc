@@ -1,1 +1,2 @@
 
+curl -H "Authorization: Bearer <JIRA_SERVER_PAT>" -F "file=@C:\path\to\junit.xml" -F "info=@info.json;type=application/json" "https://jira.example.com/rest/raven/1.0/import/execution/junit/multipart?projectKey=TM"

@@ -104,3 +104,82 @@ tasks.register('duplicateTestNames') {
     }
   }
 }
+
+
+
+
+
+
+
+
+
+
+stage('Import to Jira') {
+      agent {
+               label 'linux'
+       }
+       when {
+               beforeAgent true
+               beforeInput true
+               expression {
+                 ['dev','stable','sstest','preprod'].contains(params.TESTENV) &&
+                 ['dev','stable'].contains(params.TESTDOMAIN) &&
+                 ['all','regression'].contains(params.TAG) &&
+                 !isLibrary &&
+                 params.Xray
+               }
+       }
+       tools {
+               jdk 'java-17'
+       }
+       environment {
+               JIRA_BASE_URL = 'https://jira.example.com'     // Jira Server/DC URL'iniz
+               JIRA_PAT_CRED = 'jira-pat-id'                  // Jenkins Secret Text credential ID (PAT)
+       }
+       steps {
+               script {
+                  // 1) Allure raporunu üret ve zip’le
+                  sh "allure generate ${PROJECT_NAME}/build/allure-results -o allure-report --clean || true"
+                  sh "zip -r -q allure-report.zip allure-report || true"
+
+                  // 2) Jenkins’te Allure raporu URL’i
+                  def allureReportUrl = "${env.BUILD_URL}allure/"
+
+                  // 3) Xray’e JUnit import + TE açıklamasına Allure URL
+                  exws (extWorkspace) {
+                        step([$class: 'XrayImportBuilder',
+                               endpointName: '/junit',
+                               importFilePath: "${PROJECT_NAME}/build/test-results/**/*.xml",
+                               importInParallel: 'false',
+                               importToSameExecution: 'true',
+                               projectKey: 'TM',
+                               serverInstance: 'SERVER-asdsadas-232dsada-sdsdsad-dsd',
+                               // Eklenti sürümüne göre aşağıdaki iki seçenekten biri çalışır:
+                               // testExecInfoJson veya testExecInfo
+                               testExecInfoJson: """{
+                                 "fields": {
+                                   "summary": "Test Execution - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                                   "description": "Allure Report: ${allureReportUrl}"
+                                 }
+                               }""",
+                               testExecKeyOutput: 'XRAY_TE_KEY'
+                         ])
+                  }
+
+                  if (!env.XRAY_TE_KEY) {
+                     error "Xray Test Execution anahtarı alınamadı. 'testExecKeyOutput' desteğini kontrol edin."
+                  }
+
+                  // 4) Allure zip’i TE issue’una PAT ile attachment olarak yükle
+                  withCredentials([string(credentialsId: env.JIRA_PAT_CRED, variable: 'JIRA_PAT')]) {
+                      sh "curl -sS -H 'X-Atlassian-Token: no-check' -H \"Authorization: Bearer ${JIRA_PAT}\" -F file=@allure-report.zip ${JIRA_BASE_URL}/rest/api/2/issue/${env.XRAY_TE_KEY}/attachments | cat"
+                  }
+               }
+         }
+         post {
+           always {
+             // Jenkins UI'de Allure raporunu yayınla (BUILD_URL/allure/)
+             allure(results: [[path: "${PROJECT_NAME}/build/allure-results"]])
+           }
+         }
+}

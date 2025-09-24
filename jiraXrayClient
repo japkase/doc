@@ -1,0 +1,116 @@
+package com.allurexray.jira;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Component;
+import org.springframework.util.Assert;
+import org.springframework.web.client.HttpStatusCodeException;
+import org.springframework.web.client.RestTemplate;
+
+import java.util.HashMap;
+import java.util.Map;
+
+@Component
+public class JiraXrayClient {
+
+	private final RestTemplate restTemplate;
+
+	public JiraXrayClient() {
+		this.restTemplate = new RestTemplate();
+	}
+
+	private HttpHeaders authHeaders(String pat) {
+		HttpHeaders headers = new HttpHeaders();
+		headers.set(HttpHeaders.AUTHORIZATION, "Bearer " + pat);
+		headers.setContentType(MediaType.APPLICATION_JSON);
+		return headers;
+	}
+
+	public String createTestIssue(String baseUrl, String pat, String projectKey, String summary, String description) {
+		Assert.hasText(projectKey, "projectKey required");
+		Assert.hasText(summary, "summary required");
+		Assert.hasText(pat, "PAT required");
+
+		Map<String, Object> payload = Map.of(
+				"fields", Map.of(
+						"project", Map.of("key", projectKey),
+						"summary", summary,
+						"description", description != null ? description : "",
+						"issuetype", Map.of("name", "Test")
+				)
+		);
+
+		try {
+			ResponseEntity<JsonNode> resp = restTemplate.postForEntity(
+					stripTrailingSlash(baseUrl) + "/rest/api/2/issue",
+					new HttpEntity<>(payload, authHeaders(pat)),
+					JsonNode.class
+			);
+			JsonNode body = resp.getBody();
+			return body != null ? body.path("key").asText() : null;
+		} catch (HttpStatusCodeException e) {
+			throw new RuntimeException("Jira create issue failed: status=" + e.getStatusCode().value() + ", body=" + e.getResponseBodyAsString(), e);
+		}
+	}
+
+	public void addManualStep(String baseUrl, String pat, String issueKey, String action, String data, String expected) {
+		Assert.hasText(pat, "PAT required");
+		Map<String, Object> payload = new HashMap<>();
+		payload.put("action", action != null ? action : "");
+		payload.put("data", data != null ? data : "");
+		payload.put("result", expected != null ? expected : "");
+
+		String root = stripTrailingSlash(baseUrl);
+		RuntimeException lastEx = null;
+
+		// Try primary endpoint
+		try {
+			restTemplate.postForEntity(
+					root + "/rest/raven/1.0/api/test/" + issueKey + "/step",
+					new HttpEntity<>(payload, authHeaders(pat)),
+					Void.class
+			);
+			return;
+		} catch (HttpStatusCodeException e) {
+			lastEx = new RuntimeException("Xray add step (step) failed: status=" + e.getStatusCode().value() + ", body=" + e.getResponseBodyAsString(), e);
+		}
+
+		// Fallback 1: alternate endpoint name 'teststep'
+		try {
+			restTemplate.postForEntity(
+					root + "/rest/raven/1.0/api/test/" + issueKey + "/teststep",
+					new HttpEntity<>(payload, authHeaders(pat)),
+					Void.class
+			);
+			return;
+		} catch (HttpStatusCodeException e) {
+			lastEx = new RuntimeException("Xray add step (teststep) failed: status=" + e.getStatusCode().value() + ", body=" + e.getResponseBodyAsString(), e);
+		}
+
+		// Fallback 2: alternate field name for expected result
+		try {
+			Map<String, Object> altPayload = new HashMap<>(payload);
+			altPayload.remove("result");
+			altPayload.put("expectedResult", expected != null ? expected : "");
+			restTemplate.postForEntity(
+					root + "/rest/raven/1.0/api/test/" + issueKey + "/step",
+					new HttpEntity<>(altPayload, authHeaders(pat)),
+					Void.class
+			);
+			return;
+		} catch (HttpStatusCodeException e) {
+			lastEx = new RuntimeException("Xray add step (expectedResult) failed: status=" + e.getStatusCode().value() + ", body=" + e.getResponseBodyAsString(), e);
+		}
+
+		throw lastEx != null ? lastEx : new RuntimeException("Xray add step failed: unknown error");
+	}
+
+	private String stripTrailingSlash(String s) {
+		if (s == null || s.isBlank()) return s;
+		return s.endsWith("/") ? s.substring(0, s.length() - 1) : s;
+	}
+}

@@ -68,7 +68,7 @@ public class JiraXrayClient {
 		String root = stripTrailingSlash(baseUrl);
 		RuntimeException lastEx = null;
 
-		// Try primary endpoint (flat payload)
+		// Try primary endpoint (1.0 flat)
 		try {
 			restTemplate.postForEntity(
 					root + "/rest/raven/1.0/api/test/" + issueKey + "/step",
@@ -77,10 +77,10 @@ public class JiraXrayClient {
 			);
 			return;
 		} catch (HttpStatusCodeException e) {
-			lastEx = new RuntimeException("Xray add step (step flat) failed: status=" + e.getStatusCode().value() + ", body=" + e.getResponseBodyAsString(), e);
+			lastEx = new RuntimeException("Xray add step (1.0 step flat) failed: status=" + e.getStatusCode().value() + ", body=" + e.getResponseBodyAsString(), e);
 		}
 
-		// Fallback 1: alternate endpoint 'teststep' (flat payload)
+		// Fallback 1: 1.0 'teststep' (flat)
 		try {
 			restTemplate.postForEntity(
 					root + "/rest/raven/1.0/api/test/" + issueKey + "/teststep",
@@ -89,10 +89,10 @@ public class JiraXrayClient {
 			);
 			return;
 		} catch (HttpStatusCodeException e) {
-			lastEx = new RuntimeException("Xray add step (teststep flat) failed: status=" + e.getStatusCode().value() + ", body=" + e.getResponseBodyAsString(), e);
+			lastEx = new RuntimeException("Xray add step (1.0 teststep flat) failed: status=" + e.getStatusCode().value() + ", body=" + e.getResponseBodyAsString(), e);
 		}
 
-		// Fallback 2: nested payload with fields.result
+		// Fallback 2: 1.0 nested fields.result
 		try {
 			Map<String, Object> fields = new HashMap<>();
 			fields.put("action", flat.get("action"));
@@ -107,10 +107,10 @@ public class JiraXrayClient {
 			);
 			return;
 		} catch (HttpStatusCodeException e) {
-			lastEx = new RuntimeException("Xray add step (nested result) failed: status=" + e.getStatusCode().value() + ", body=" + e.getResponseBodyAsString(), e);
+			lastEx = new RuntimeException("Xray add step (1.0 nested result) failed: status=" + e.getStatusCode().value() + ", body=" + e.getResponseBodyAsString(), e);
 		}
 
-		// Fallback 3: nested payload with fields."expected result"
+		// Fallback 3: 1.0 nested fields."expected result"
 		try {
 			Map<String, Object> fields = new HashMap<>();
 			fields.put("action", flat.get("action"));
@@ -125,7 +125,37 @@ public class JiraXrayClient {
 			);
 			return;
 		} catch (HttpStatusCodeException e) {
-			lastEx = new RuntimeException("Xray add step (expected result nested) failed: status=" + e.getStatusCode().value() + ", body=" + e.getResponseBodyAsString(), e);
+			lastEx = new RuntimeException("Xray add step (1.0 expected result nested) failed: status=" + e.getStatusCode().value() + ", body=" + e.getResponseBodyAsString(), e);
+		}
+
+		// Fallback 4: 2.0 endpoint (flat)
+		try {
+			restTemplate.postForEntity(
+					root + "/rest/raven/2.0/api/test/" + issueKey + "/step",
+					new HttpEntity<>(flat, authHeaders(pat)),
+					Void.class
+			);
+			return;
+		} catch (HttpStatusCodeException e) {
+			lastEx = new RuntimeException("Xray add step (2.0 step flat) failed: status=" + e.getStatusCode().value() + ", body=" + e.getResponseBodyAsString(), e);
+		}
+
+		// Fallback 5: 2.0 endpoint (nested fields.result)
+		try {
+			Map<String, Object> fields = new HashMap<>();
+			fields.put("action", flat.get("action"));
+			fields.put("data", flat.get("data"));
+			fields.put("result", flat.get("result"));
+			Map<String, Object> nested = new HashMap<>();
+			nested.put("fields", fields);
+			restTemplate.postForEntity(
+					root + "/rest/raven/2.0/api/test/" + issueKey + "/step",
+					new HttpEntity<>(nested, authHeaders(pat)),
+					Void.class
+			);
+			return;
+		} catch (HttpStatusCodeException e) {
+			lastEx = new RuntimeException("Xray add step (2.0 nested result) failed: status=" + e.getStatusCode().value() + ", body=" + e.getResponseBodyAsString(), e);
 		}
 
 		throw lastEx != null ? lastEx : new RuntimeException("Xray add step failed: unknown error");

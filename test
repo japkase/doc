@@ -169,10 +169,16 @@ public class AllureToXrayService {
 		if (atts != null && atts.isArray()) {
 			for (JsonNode a : atts) {
 				String name = safe(a.path("name").asText("")).toLowerCase();
+				String type = safe(a.path("type").asText("")).toLowerCase();
 				String source = safe(a.path("source").asText("")).trim();
-				if (!source.isEmpty() && name.contains(keyword)) {
+				boolean looksJson = type.contains("json") || name.contains("json");
+				boolean nameMatches = name.contains(keyword);
+				if (!source.isEmpty() && (nameMatches || looksJson)) {
 					try {
-						return safe(allureClient.fetchAttachmentText(allureBaseDataUrl, source, authHeader));
+						String body = safe(allureClient.fetchAttachmentText(allureBaseDataUrl, source, authHeader));
+						if (!body.isBlank()) {
+							return body;
+						}
 					} catch (Exception ignored) { }
 				}
 			}

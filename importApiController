@@ -1,0 +1,83 @@
+package com.allurexray.api;
+
+import com.allurexray.importer.AllureToXrayService;
+import com.allurexray.api.dto.ImportRequest;
+import com.allurexray.api.dto.PreviewItem;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.util.StringUtils;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.*;
+
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+import java.util.Base64;
+
+@RestController
+@RequestMapping("/api")
+@RequiredArgsConstructor
+@Validated
+public class ImportApiController {
+
+	private final AllureToXrayService importer;
+
+	@PostMapping("/import")
+	public ResponseEntity<List<String>> importNow(
+			@RequestHeader(value = "Authorization", required = false) String authorization,
+			@RequestHeader(value = "X-Allure-Authorization", required = false) String allureAuthorization,
+			@RequestBody(required = false) ImportRequest req
+	) {
+		String pat = extractBearerToken(authorization);
+		String repositoryPath = req != null ? req.getRepositoryPath() : null;
+		String allureBaseUrl = req != null ? req.getAllureBaseUrl() : null;
+		String jiraBaseUrl = req != null ? req.getJiraBaseUrl() : null;
+
+		String resolvedAllureAuth = resolveAllureAuth(allureAuthorization,
+				req != null ? req.getAllureUser() : null,
+				req != null ? req.getAllurePassword() : null);
+
+		List<String> keys = importer.importAllTests(
+				repositoryPath,
+				allureBaseUrl,
+				jiraBaseUrl,
+				pat,
+				resolvedAllureAuth,
+				req != null ? req.getSelectedUids() : null
+		);
+		return ResponseEntity.ok(keys);
+	}
+
+	@PostMapping("/preview")
+	public ResponseEntity<List<PreviewItem>> preview(
+			@RequestHeader(value = "Authorization", required = false) String authorization,
+			@RequestHeader(value = "X-Allure-Authorization", required = false) String allureAuthorization,
+			@RequestBody(required = false) ImportRequest req
+	) {
+		String pat = extractBearerToken(authorization);
+		String allureBaseUrl = req != null ? req.getAllureBaseUrl() : null;
+		String jiraBaseUrl = req != null ? req.getJiraBaseUrl() : null;
+		String resolvedAllureAuth = resolveAllureAuth(allureAuthorization,
+				req != null ? req.getAllureUser() : null,
+				req != null ? req.getAllurePassword() : null);
+		List<PreviewItem> items = importer.previewPayloads(allureBaseUrl, jiraBaseUrl, pat, resolvedAllureAuth);
+		return ResponseEntity.ok(items);
+	}
+
+	private String extractBearerToken(String authorizationHeader) {
+		if (!StringUtils.hasText(authorizationHeader)) return null;
+		String prefix = "Bearer ";
+		if (authorizationHeader.startsWith(prefix)) {
+			return authorizationHeader.substring(prefix.length());
+		}
+		return null;
+	}
+
+	private String resolveAllureAuth(String passthroughHeader, String user, String password) {
+		if (StringUtils.hasText(user) && StringUtils.hasText(password)) {
+			String raw = user + ":" + password;
+			String enc = Base64.getEncoder().encodeToString(raw.getBytes(StandardCharsets.UTF_8));
+			return "Basic " + enc;
+		}
+		return passthroughHeader; // could be Basic or Bearer
+	}
+}

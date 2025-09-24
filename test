@@ -1,13 +1,237 @@
-package com.allurexray.api;
+package com.allurexray.importer;
 
-import org.springframework.stereotype.Controller;
-import org.springframework.web.bind.annotation.GetMapping;
+import com.allurexray.allure.AllureClient;
+import com.allurexray.api.dto.PreviewItem;
+import com.allurexray.config.AppProperties;
+import com.allurexray.jira.JiraXrayClient;
+import com.fasterxml.jackson.databind.JsonNode;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
 
-@Controller
-public class HomeController {
+import java.net.URI;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 
-	@GetMapping("/")
-	public String index() {
-		return "forward:/index.html";
+@Service
+@RequiredArgsConstructor
+public class AllureToXrayService {
+
+	private final AllureClient allureClient;
+	private final JiraXrayClient jiraXrayClient;
+	private final AppProperties appProperties;
+
+	public List<String> importAllTests() {
+		return importAllTests(null, null, null, null);
 	}
+
+	public List<String> importAllTests(String repositoryPath) {
+		return importAllTests(repositoryPath, null, null, null);
+	}
+
+	public List<String> importAllTests(String repositoryPath, String allureBaseUrlOverride, String jiraBaseUrlOverride, String patOverride) {
+		return importAllTests(repositoryPath, allureBaseUrlOverride, jiraBaseUrlOverride, patOverride, null);
+	}
+
+	public List<String> importAllTests(String repositoryPath,
+									 String allureBaseUrlOverride,
+									 String jiraBaseUrlOverride,
+									 String patOverride,
+									 String allureAuthorizationHeader) {
+		URI allureBaseDataUrl = resolveAllureBase(allureBaseUrlOverride);
+		String jiraBaseUrl = resolveJiraBase(jiraBaseUrlOverride);
+		String pat = resolvePat(patOverride);
+		String projectKey = appProperties.getJira().getProjectKey();
+
+		validateRequired(allureBaseDataUrl, jiraBaseUrl, pat, projectKey);
+
+		JsonNode suites = allureClient.fetchSuites(allureBaseDataUrl, allureAuthorizationHeader);
+		List<String> uids = new ArrayList<>();
+		collectUidsRecursive(suites, uids);
+
+		List<String> createdIssueKeys = new ArrayList<>();
+		for (String uid : uids) {
+			JsonNode testJson = allureClient.fetchTestCase(allureBaseDataUrl, uid, allureAuthorizationHeader);
+			String issueKey = createTestInJira(jiraBaseUrl, pat, projectKey, testJson);
+			if (issueKey != null && !issueKey.isBlank()) {
+				createdIssueKeys.add(issueKey);
+				addStepsIfEnabled(jiraBaseUrl, pat, issueKey, testJson);
+			}
+		}
+		return createdIssueKeys;
+	}
+
+	public List<PreviewItem> previewPayloads(String allureBaseUrlOverride, String jiraBaseUrlOverride, String patOverride, String allureAuthorizationHeader) {
+		URI allureBaseDataUrl = resolveAllureBase(allureBaseUrlOverride);
+		String projectKey = appProperties.getJira().getProjectKey();
+		if (allureBaseDataUrl == null) {
+			throw new IllegalArgumentException("Allure base URL is required (override in request)");
+		}
+		if (projectKey == null || projectKey.isBlank()) {
+			throw new IllegalArgumentException("Jira project key is required (configure app.jira.project-key)");
+		}
+
+		JsonNode suites = allureClient.fetchSuites(allureBaseDataUrl, allureAuthorizationHeader);
+		List<String> uids = new ArrayList<>();
+		collectUidsRecursive(suites, uids);
+
+		List<PreviewItem> items = new ArrayList<>();
+		for (String uid : uids) {
+			JsonNode testJson = allureClient.fetchTestCase(allureBaseDataUrl, uid, allureAuthorizationHeader);
+			String name = testJson.path("name").asText("");
+			String fullName = testJson.path("fullName").asText("");
+			String description = testJson.path("description").asText("");
+			String summary = name != null && !name.isBlank() ? name : fullName;
+
+			Map<String, Object> issuePayload = new HashMap<>();
+			Map<String, Object> fields = new HashMap<>();
+			fields.put("project", Map.of("key", projectKey));
+			fields.put("summary", summary);
+			fields.put("description", description);
+			fields.put("issuetype", Map.of("name", "Test"));
+			issuePayload.put("fields", fields);
+
+			List<Map<String, String>> steps = extractAllureSteps(testJson);
+
+			PreviewItem item = new PreviewItem();
+			item.setTestUid(uid);
+			item.setTestName(summary);
+			item.setIssuePayload(issuePayload);
+			item.setSteps(steps);
+			items.add(item);
+		}
+		return items;
+	}
+
+	private List<Map<String, String>> extractAllureSteps(JsonNode testJson) {
+		List<Map<String, String>> steps = new ArrayList<>();
+		JsonNode s = testJson.path("steps");
+		if (s == null || !s.isArray() || s.isEmpty()) {
+			s = testJson.path("testStage").path("steps");
+		}
+		flattenSteps(s, steps);
+		return steps;
+	}
+
+	private void flattenSteps(JsonNode stepsNode, List<Map<String, String>> out) {
+		if (stepsNode == null || !stepsNode.isArray()) return;
+		for (JsonNode step : stepsNode) {
+			String action = safe(step.path("name").asText(null));
+			String data = extractStepParameters(step.path("parameters"));
+			String expected = safe(step.path("statusDetails").path("message").asText(null));
+			Map<String, String> m = new HashMap<>();
+			m.put("action", action);
+			m.put("data", data);
+			m.put("result", expected);
+			out.add(m);
+			// nested steps
+			flattenSteps(step.path("steps"), out);
+		}
+	}
+
+	private void validateRequired(URI allureBaseDataUrl, String jiraBaseUrl, String pat, String projectKey) {
+		if (allureBaseDataUrl == null) {
+			throw new IllegalArgumentException("Allure base URL is required (override in request)");
+		}
+		if (jiraBaseUrl == null || jiraBaseUrl.isBlank()) {
+			throw new IllegalArgumentException("Jira base URL is required (override in request or configure app.jira.base-url)");
+		}
+		if (pat == null || pat.isBlank()) {
+			throw new IllegalArgumentException("PAT is required (Authorization: Bearer <token>)");
+		}
+		if (projectKey == null || projectKey.isBlank()) {
+			throw new IllegalArgumentException("Jira project key is required (configure app.jira.project-key)");
+		}
+	}
+
+	private URI resolveAllureBase(String override) {
+		if (override != null && !override.isBlank()) {
+			return URI.create(ensureTrailingSlash(override));
+		}
+		URI fromProps = appProperties.getAllure().getBaseUrl();
+		if (fromProps == null) return null;
+		return URI.create(ensureTrailingSlash(fromProps.toString()));
+	}
+
+	private String resolveJiraBase(String override) {
+		if (override != null && !override.isBlank()) {
+			return stripTrailingSlash(override);
+		}
+		return appProperties.getJira().getBaseUrl() != null ? stripTrailingSlash(appProperties.getJira().getBaseUrl().toString()) : null;
+	}
+
+	private String resolvePat(String override) {
+		if (override != null && !override.isBlank()) {
+			return override;
+		}
+		return appProperties.getJira().getPat();
+	}
+
+	private void collectUidsRecursive(JsonNode node, List<String> acc) {
+		if (node == null) return;
+		if (node.isArray()) {
+			for (JsonNode child : node) {
+				collectUidsRecursive(child, acc);
+			}
+			return;
+		}
+		if (node.has("uid") && node.has("name") && !node.has("children")) {
+			acc.add(node.get("uid").asText());
+		}
+		if (node.has("children")) {
+			for (JsonNode child : node.get("children")) {
+				collectUidsRecursive(child, acc);
+			}
+		}
+	}
+
+	private String createTestInJira(String baseUrl, String pat, String projectKey, JsonNode testJson) {
+		String name = testJson.path("name").asText("");
+		String fullName = testJson.path("fullName").asText("");
+		String description = testJson.path("description").asText("");
+		String summary = name != null && !name.isBlank() ? name : fullName;
+		return jiraXrayClient.createTestIssue(baseUrl, pat, projectKey, summary, description);
+	}
+
+	private void addStepsIfEnabled(String baseUrl, String pat, String issueKey, JsonNode testJson) {
+		if (!appProperties.getXray().isEnableSteps() || !appProperties.getXray().isUseApiForSteps()) {
+			return;
+		}
+		List<Map<String, String>> steps = extractAllureSteps(testJson);
+		if (steps.isEmpty()) return;
+		for (Map<String, String> step : steps) {
+			jiraXrayClient.addManualStep(baseUrl, pat, issueKey,
+					step.getOrDefault("action", ""),
+					step.getOrDefault("data", ""),
+					step.getOrDefault("result", ""));
+		}
+	}
+
+	private String extractStepParameters(JsonNode params) {
+		if (params == null || !params.isArray()) return "";
+		StringBuilder sb = new StringBuilder();
+		Iterator<JsonNode> it = params.elements();
+		while (it.hasNext()) {
+			JsonNode p = it.next();
+			String name = p.path("name").asText("");
+			String value = p.path("value").asText("");
+			sb.append(name).append("=").append(value);
+			if (it.hasNext()) sb.append("; ");
+		}
+		return sb.toString();
+	}
+
+	private String ensureTrailingSlash(String s) {
+		if (s == null || s.isBlank()) return s;
+		return s.endsWith("/") ? s : s + "/";
+	}
+
+	private String stripTrailingSlash(String s) {
+		if (s == null || s.isBlank()) return s;
+		return s.endsWith("/") ? s.substring(0, s.length() - 1) : s;
+	}
+
+	private String safe(String v) { return v == null ? "" : v; }
 }

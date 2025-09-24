@@ -1,101 +1,13 @@
-buildscript {
-  repositories {
-    mavenCentral()
-  }
-  dependencies {
-    classpath 'org.apache.httpcomponents:httpclient:4.5.14'
-    classpath 'org.apache.httpcomponents:httpmime:4.5.14'
-    classpath 'com.fasterxml.jackson.core:jackson-databind:2.17.1'
-  }
-}
+package com.allurexray.api;
 
-import org.apache.http.client.methods.CloseableHttpResponse
-import org.apache.http.client.methods.HttpPost
-import org.apache.http.entity.ContentType
-import org.apache.http.entity.mime.MultipartEntityBuilder
-import org.apache.http.impl.client.CloseableHttpClient
-import org.apache.http.impl.client.HttpClients
-import com.fasterxml.jackson.databind.ObjectMapper
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.GetMapping;
 
-tasks.register('xrayImport') {
-  group = 'verification'
-  description = 'JUnit sonuçlarını Xray’e import eder ve Allure zip’ini TE issue’una ekler'
+@Controller
+public class HomeController {
 
-  doLast {
-    // Zorunlu/opsiyonel parametreler (öncelik: -P > env > varsayılan)
-    String jiraBaseUrl   = (project.findProperty('jiraBaseUrl')   ?: System.getenv('JIRA_BASE_URL')) ?: ''
-    String jiraProject   = (project.findProperty('jiraProjectKey')?: System.getenv('JIRA_PROJECT'))   ?: 'TM'
-    String jiraPat       = (project.findProperty('jiraPat')       ?: System.getenv('JIRA_PAT'))       ?: ''
-    String junitFile     = (project.findProperty('junitFile')     ?: System.getenv('JUNIT_FILE'))     ?: ''
-    String allureZip     = (project.findProperty('allureZip')     ?: System.getenv('ALLURE_ZIP'))     ?: ''
-    String allureUrl     =  project.findProperty('allureUrl')     ?: System.getenv('ALLURE_URL')
-
-    if (!jiraBaseUrl || !jiraPat || !junitFile || !allureZip) {
-      throw new GradleException("Eksik parametre. Gerekli: -PjiraBaseUrl -PjiraPat -PjunitFile -PallureZip (veya eşdeğer env değişkenleri)")
-    }
-    File junit = file(junitFile)
-    File allure = file(allureZip)
-    if (!junit.exists())  throw new GradleException("JUnit girdi bulunamadı: ${junit.absolutePath}")
-    if (!allure.exists()) throw new GradleException("Allure zip bulunamadı: ${allure.absolutePath}")
-
-    def mapper = new ObjectMapper()
-    def infoMap = [
-      fields: [
-        summary    : "Test Execution - ${project.name} ${new Date().format('yyyy-MM-dd HH:mm:ss')}",
-        description: (allureUrl ? "Allure Report: ${allureUrl}" : "Imported by Gradle")
-      ]
-    ]
-    String infoJson = mapper.writeValueAsString(infoMap)
-
-    CloseableHttpClient http = HttpClients.createDefault()
-
-    // 1) Xray JUnit import (multipart)
-    String importUrl = "${jiraBaseUrl}/rest/raven/1.0/import/execution/junit/multipart?projectKey=${URLEncoder.encode(jiraProject, 'UTF-8')}"
-    HttpPost importPost = new HttpPost(importUrl)
-    importPost.addHeader('Authorization', "Bearer ${jiraPat}")
-    importPost.setEntity(
-      MultipartEntityBuilder.create()
-        .addBinaryBody('file', junit, ContentType.APPLICATION_OCTET_STREAM, junit.name)
-        .addTextBody('info', infoJson, ContentType.APPLICATION_JSON)
-        .build()
-    )
-
-    String teKey
-    try (CloseableHttpResponse resp = http.execute(importPost)) {
-      int code = resp.getStatusLine().getStatusCode()
-      String body = resp.getEntity() ? resp.getEntity().getContent().getText('UTF-8') : ''
-      if (code < 200 || code >= 300) {
-        throw new GradleException("Xray import hatası (${code}): ${body}")
-      }
-      def json = mapper.readTree(body)
-      teKey = json?.path('testExecIssue')?.path('key')?.asText(null)
-      if (!teKey) {
-        // bazı sürümlerde alan adı farklı olabilir; tüm gövdeyi yazdırın
-        throw new GradleException("TE anahtarı alınamadı. Yanıt: ${body}")
-      }
-      println "Xray import başarılı. TE: ${teKey}"
-    }
-
-    // 2) Allure zip’i TE issue’ına attachment olarak yükle
-    String attachUrl = "${jiraBaseUrl}/rest/api/2/issue/${teKey}/attachments"
-    HttpPost attachPost = new HttpPost(attachUrl)
-    attachPost.addHeader('Authorization', "Bearer ${jiraPat}")
-    attachPost.addHeader('X-Atlassian-Token', 'no-check')
-    attachPost.setEntity(
-      MultipartEntityBuilder.create()
-        .addBinaryBody('file', allure, ContentType.APPLICATION_OCTET_STREAM, allure.name)
-        .build()
-    )
-
-    try (CloseableHttpResponse resp = http.execute(attachPost)) {
-      int code = resp.getStatusLine().getStatusCode()
-      String body = resp.getEntity() ? resp.getEntity().getContent().getText('UTF-8') : ''
-      if (code < 200 || code >= 300) {
-        throw new GradleException("Attachment yüklenemedi (${code}): ${body}")
-      }
-      println "Allure zip eklendi -> ${teKey}"
-    } finally {
-      http.close()
-    }
-  }
+	@GetMapping("/")
+	public String index() {
+		return "forward:/index.html";
+	}
 }

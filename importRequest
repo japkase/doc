@@ -1,0 +1,44 @@
+package com.allurexray.api.dto;
+
+import java.util.List;
+
+public class ImportRequest {
+	private String repositoryPath;
+	private String allureBaseUrl;
+	private String jiraBaseUrl;
+	private String allureUser;
+	private String allurePassword;
+	private List<String> selectedUids;
+
+	public String getRepositoryPath() {
+		return repositoryPath;
+	}
+
+	public void setRepositoryPath(String repositoryPath) {
+		this.repositoryPath = repositoryPath;
+	}
+
+	public String getAllureBaseUrl() {
+		return allureBaseUrl;
+	}
+
+	public void setAllureBaseUrl(String allureBaseUrl) {
+		this.allureBaseUrl = allureBaseUrl;
+	}
+
+	public String getJiraBaseUrl() {
+		return jiraBaseUrl;
+	}
+
+	public void setJiraBaseUrl(String jiraBaseUrl) {
+		this.jiraBaseUrl = jiraBaseUrl;
+	}
+
+	public String getAllureUser() { return allureUser; }
+	public void setAllureUser(String allureUser) { this.allureUser = allureUser; }
+	public String getAllurePassword() { return allurePassword; }
+	public void setAllurePassword(String allurePassword) { this.allurePassword = allurePassword; }
+
+	public List<String> getSelectedUids() { return selectedUids; }
+	public void setSelectedUids(List<String> selectedUids) { this.selectedUids = selectedUids; }
+}

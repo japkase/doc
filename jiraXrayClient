@@ -27,6 +27,7 @@ public class JiraXrayClient {
 		HttpHeaders headers = new HttpHeaders();
 		headers.set(HttpHeaders.AUTHORIZATION, "Bearer " + pat);
 		headers.setContentType(MediaType.APPLICATION_JSON);
+		headers.set(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE);
 		return headers;
 	}
 
@@ -59,51 +60,72 @@ public class JiraXrayClient {
 
 	public void addManualStep(String baseUrl, String pat, String issueKey, String action, String data, String expected) {
 		Assert.hasText(pat, "PAT required");
-		Map<String, Object> payload = new HashMap<>();
-		payload.put("action", action != null ? action : "");
-		payload.put("data", data != null ? data : "");
-		payload.put("result", expected != null ? expected : "");
+		Map<String, Object> flat = new HashMap<>();
+		flat.put("action", action != null ? action : "");
+		flat.put("data", data != null ? data : "");
+		flat.put("result", expected != null ? expected : "");
 
 		String root = stripTrailingSlash(baseUrl);
 		RuntimeException lastEx = null;
 
-		// Try primary endpoint
+		// Try primary endpoint (flat payload)
 		try {
 			restTemplate.postForEntity(
 					root + "/rest/raven/1.0/api/test/" + issueKey + "/step",
-					new HttpEntity<>(payload, authHeaders(pat)),
+					new HttpEntity<>(flat, authHeaders(pat)),
 					Void.class
 			);
 			return;
 		} catch (HttpStatusCodeException e) {
-			lastEx = new RuntimeException("Xray add step (step) failed: status=" + e.getStatusCode().value() + ", body=" + e.getResponseBodyAsString(), e);
+			lastEx = new RuntimeException("Xray add step (step flat) failed: status=" + e.getStatusCode().value() + ", body=" + e.getResponseBodyAsString(), e);
 		}
 
-		// Fallback 1: alternate endpoint name 'teststep'
+		// Fallback 1: alternate endpoint 'teststep' (flat payload)
 		try {
 			restTemplate.postForEntity(
 					root + "/rest/raven/1.0/api/test/" + issueKey + "/teststep",
-					new HttpEntity<>(payload, authHeaders(pat)),
+					new HttpEntity<>(flat, authHeaders(pat)),
 					Void.class
 			);
 			return;
 		} catch (HttpStatusCodeException e) {
-			lastEx = new RuntimeException("Xray add step (teststep) failed: status=" + e.getStatusCode().value() + ", body=" + e.getResponseBodyAsString(), e);
+			lastEx = new RuntimeException("Xray add step (teststep flat) failed: status=" + e.getStatusCode().value() + ", body=" + e.getResponseBodyAsString(), e);
 		}
 
-		// Fallback 2: alternate field name for expected result
+		// Fallback 2: nested payload with fields.result
 		try {
-			Map<String, Object> altPayload = new HashMap<>(payload);
-			altPayload.remove("result");
-			altPayload.put("expectedResult", expected != null ? expected : "");
+			Map<String, Object> fields = new HashMap<>();
+			fields.put("action", flat.get("action"));
+			fields.put("data", flat.get("data"));
+			fields.put("result", flat.get("result"));
+			Map<String, Object> nested = new HashMap<>();
+			nested.put("fields", fields);
 			restTemplate.postForEntity(
 					root + "/rest/raven/1.0/api/test/" + issueKey + "/step",
-					new HttpEntity<>(altPayload, authHeaders(pat)),
+					new HttpEntity<>(nested, authHeaders(pat)),
 					Void.class
 			);
 			return;
 		} catch (HttpStatusCodeException e) {
-			lastEx = new RuntimeException("Xray add step (expectedResult) failed: status=" + e.getStatusCode().value() + ", body=" + e.getResponseBodyAsString(), e);
+			lastEx = new RuntimeException("Xray add step (nested result) failed: status=" + e.getStatusCode().value() + ", body=" + e.getResponseBodyAsString(), e);
+		}
+
+		// Fallback 3: nested payload with fields."expected result"
+		try {
+			Map<String, Object> fields = new HashMap<>();
+			fields.put("action", flat.get("action"));
+			fields.put("data", flat.get("data"));
+			fields.put("expected result", flat.get("result"));
+			Map<String, Object> nested = new HashMap<>();
+			nested.put("fields", fields);
+			restTemplate.postForEntity(
+					root + "/rest/raven/1.0/api/test/" + issueKey + "/step",
+					new HttpEntity<>(nested, authHeaders(pat)),
+					Void.class
+			);
+			return;
+		} catch (HttpStatusCodeException e) {
+			lastEx = new RuntimeException("Xray add step (expected result nested) failed: status=" + e.getStatusCode().value() + ", body=" + e.getResponseBodyAsString(), e);
 		}
 
 		throw lastEx != null ? lastEx : new RuntimeException("Xray add step failed: unknown error");

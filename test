@@ -1,5 +1,8 @@
 package com.allurexray.importer;
 
+$[?(@.username == 'alice' && @.password == 's3cr3t')]
+
+
 import com.allurexray.allure.AllureClient;
 import com.allurexray.api.dto.PreviewItem;
 import com.allurexray.config.AppProperties;
